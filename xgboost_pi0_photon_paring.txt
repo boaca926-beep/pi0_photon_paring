@@ -1,0 +1,304 @@
+import numpy as np
+from sklearn.model_selection import train_test_split
+import xgboost as xgb
+
+# ============================================================================
+# STEP 1: Calculate invariant mass CORRECTLY from 4-vectors
+# ============================================================================
+
+def inv_mass_4vector(p1, p2):
+    """
+    Calculate diphoton invariant mass from two photon 4-vectors.
+    
+    Args:
+        p1, p2: Arrays/lists of [E, px, py, pz] or [E, pt, eta, phi]
+    
+    Returns:
+        Invariant mass in GeV
+    """
+    # Method 1: If you have (E, px, py, pz)
+    if len(p1) == 4 and len(p2) == 4:
+        e = p1[0] + p2[0]
+        px = p1[1] + p2[1]
+        py = p1[2] + p2[2]
+        pz = p1[3] + p2[3]
+        return np.sqrt(e**2 - (px**2 + py**2 + pz**2))
+    
+    # Method 2: If you have (E, pt, eta, phi) - COMMON IN NTUPLES
+    elif len(p1) == 4 and len(p2) == 4:
+        # Convert (E, pt, eta, phi) to invariant mass directly
+        e1, pt1, eta1, phi1 = p1
+        e2, pt2, eta2, phi2 = p2
+        
+        # This is the EXACT formula using 4-vectors
+        # No small-angle approximation, no ΔR, no cos(dr)
+        return np.sqrt(e1**2 + e2**2 + 2*e1*e2 - 2*pt1*pt2*np.cos(phi1-phi2) - 2*(e1*e2 - pt1*pt2*np.cos(phi1-phi2))/np.cosh(eta1-eta2))
+    
+    # Method 3: SIMPLIFIED - if you have 4-vector objects
+    else:
+        # Use your experiment's Lorentz vector class
+        # (e.g., ROOT.TLorentzVector, vector.obj, etc.)
+        return (p1 + p2).M()
+
+# ============================================================================
+# STEP 2: For 3-photon events, create ALL pairs with EXACT masses
+# ============================================================================
+
+def prepare_3photon_pairs(df_events):
+    """
+    Convert 3-photon events into training pairs with EXACT invariant masses.
+    
+    Assumes your DataFrame has columns:
+    event, 
+    E1, px1, py1, pz1,  # OR E1, pt1, eta1, phi1
+    E2, px2, py2, pz2,
+    E3, px3, py3, pz3,
+    is_signal, true_pi0_pair
+    """
+    pairs = []
+    
+    for _, evt in df_events.iterrows():
+        # Get 4-vectors for all 3 photons
+        # ADAPT THIS TO YOUR EXACT COLUMN NAMES
+        photons = [
+            np.array([evt.E1, evt.px1, evt.py1, evt.pz1]),  # [E, px, py, pz]
+            np.array([evt.E2, evt.px2, evt.py2, evt.pz2]),
+            np.array([evt.E3, evt.px3, evt.py3, evt.pz3])
+        ]
+        
+        # All 3 possible pairs
+        pair_indices = [(0,1), (0,2), (1,2)]
+        
+        for i, j in pair_indices:
+            # Calculate EXACT invariant mass from 4-vectors
+            mass = inv_mass_4vector(photons[i], photons[j])
+            
+            # Opening angle (true θ, not ΔR)
+            # cosθ = (p1·p2)/(|p1||p2|)
+            p1_mag = np.sqrt(photons[i][1]**2 + photons[i][2]**2 + photons[i][3]**2)
+            p2_mag = np.sqrt(photons[j][1]**2 + photons[j][2]**2 + photons[j][3]**2)
+            dot_product = photons[i][1]*photons[j][1] + photons[i][2]*photons[j][2] + photons[i][3]*photons[j][3]
+            cos_theta = dot_product / (p1_mag * p2_mag + 1e-10)
+            theta = np.arccos(np.clip(cos_theta, -1, 1))
+            
+            # Energy asymmetry
+            e1 = photons[i][0]
+            e2 = photons[j][0]
+            pt_asym = np.abs(e1 - e2) / (e1 + e2 + 1e-10)
+            
+            # Is this the correct π⁰ pair? (requires truth info)
+            is_pi0 = 0
+            if 'is_signal' in evt and evt.is_signal == 1:
+                if 'true_pi0_pair' in evt:
+                    is_pi0 = 1 if (i, j) == evt.true_pi0_pair else 0
+                else:
+                    # If you don't have exact pair truth, 
+                    # assume the pair with mass closest to 0.135 is correct
+                    is_pi0 = 1 if abs(mass - 0.135) < 0.015 else 0
+            
+            pairs.append({
+                'event': evt.event,
+                'pair_id': f"{evt.event}_{i}{j}",
+                'm_γγ': mass,
+                'opening_angle': theta,  # TRUE opening angle in radians
+                'cos_theta': cos_theta,
+                'pt_asym': pt_asym,
+                'E1': e1,
+                'E2': e2,
+                'is_pi0': is_pi0
+            })
+    
+    return pd.DataFrame(pairs)
+
+# ============================================================================
+# STEP 3: Train XGBoost on EXACT 4-vector quantities
+# ============================================================================
+
+def train_pi0_classifier_4vector(pair_df):
+    """
+    Train classifier using EXACT invariant mass and true opening angle.
+    This is MORE ACCURATE and SIMPLER than using ΔR approximations.
+    """
+    
+    # Features: EXACT physics quantities from 4-vectors
+    features = ['m_γγ', 'opening_angle', 'cos_theta', 'pt_asym']
+    X = pair_df[features]
+    y = pair_df['is_pi0']
+    
+    # Split
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+    
+    # Ultra-simple XGBoost - shallow trees, fast training
+    model = xgb.XGBClassifier(
+        n_estimators=100,
+        max_depth=3,           # Shallow = fast, interpretable
+        learning_rate=0.1,
+        objective='binary:logistic',
+        eval_metric='auc',
+        use_label_encoder=False,
+        random_state=42
+    )
+    
+    # Train
+    model.fit(X_train, y_train,
+              eval_set=[(X_test, y_test)],
+              verbose=False)
+    
+    # Evaluate
+    y_pred = model.predict_proba(X_test)[:, 1]
+    auc = roc_auc_score(y_test, y_pred)
+    print(f"AUC: {auc:.3f}")
+    
+    # Feature importance - check that m_γγ and opening_angle are top
+    importance = model.feature_importances_
+    for f, imp in zip(features, importance):
+        print(f"  {f}: {imp:.3f}")
+    
+    return model
+
+# ============================================================================
+# STEP 4: For a NEW 3-photon event, pick the best π⁰ candidate
+# ============================================================================
+
+def find_best_pi0_candidate(photon_4vectors, model):
+    """
+    photon_4vectors: list of 3 arrays, each [E, px, py, pz] or [E, pt, eta, phi]
+    Returns: (best_pair_indices, probability, mass)
+    """
+    pairs = [(0,1), (0,2), (1,2)]
+    candidates = []
+    
+    for i, j in pairs:
+        # Calculate EXACT quantities from 4-vectors
+        mass = inv_mass_4vector(photon_4vectors[i], photon_4vectors[j])
+        
+        # True opening angle
+        p1 = photon_4vectors[i]
+        p2 = photon_4vectors[j]
+        p1_mag = np.sqrt(p1[1]**2 + p1[2]**2 + p1[3]**2)
+        p2_mag = np.sqrt(p2[1]**2 + p2[2]**2 + p2[3]**2)
+        dot = p1[1]*p2[1] + p1[2]*p2[2] + p1[3]*p2[3]
+        cos_theta = dot / (p1_mag * p2_mag + 1e-10)
+        theta = np.arccos(np.clip(cos_theta, -1, 1))
+        
+        # Energy asymmetry
+        e1, e2 = p1[0], p2[0]
+        asym = np.abs(e1 - e2) / (e1 + e2 + 1e-10)
+        
+        # Predict
+        proba = model.predict_proba([[mass, theta, cos_theta, asym]])[0, 1]
+        candidates.append({
+            'pair': (i, j),
+            'score': proba,
+            'mass': mass,
+            'theta': theta
+        })
+    
+    # Return the best candidate
+    best = max(candidates, key=lambda x: x['score'])
+    return best['pair'], best['score'], best['mass']
+
+# ============================================================================
+# EXAMPLE: Complete working example with synthetic data
+# ============================================================================
+
+if __name__ == "__main__":
+    print("="*60)
+    print("π⁰ IDENTIFICATION IN 3-PHOTON EVENTS USING 4-VECTORS")
+    print("="*60)
+    
+    # Generate synthetic data for testing
+    np.random.seed(42)
+    n_events = 1000
+    
+    data = []
+    for evt in range(n_events):
+        # Signal event: one π⁰ + one extra photon
+        if np.random.random() < 0.5:
+            # π⁰ at rest in its own frame, then boosted
+            m_pi0 = 0.135
+            
+            # Generate π⁰ with some momentum
+            pi0_pt = np.random.uniform(1, 10)
+            pi0_eta = np.random.uniform(-1, 1)
+            pi0_phi = np.random.uniform(-np.pi, np.pi)
+            
+            # Decay in rest frame: back-to-back photons
+            # Then boost to lab frame
+            # This is simplified - in reality use proper decay generator
+            e1_lab = pi0_pt * np.cosh(pi0_eta) / 2
+            e2_lab = pi0_pt * np.cosh(pi0_eta) / 2
+            
+            # Approximate directions (small opening angle in lab)
+            dr = 0.135 / pi0_pt  # approximation: θ ≈ m/p
+            phi1 = pi0_phi
+            phi2 = pi0_phi + dr
+            eta1 = pi0_eta
+            eta2 = pi0_eta + dr/2
+            
+            # Extra random photon
+            e3 = np.random.uniform(0.5, 5)
+            eta3 = np.random.uniform(-2, 2)
+            phi3 = np.random.uniform(-np.pi, np.pi)
+            
+            data.append({
+                'event': evt,
+                'E1': e1_lab, 'px1': e1_lab*np.cos(phi1)/np.cosh(eta1), 'py1': e1_lab*np.sin(phi1)/np.cosh(eta1), 'pz1': e1_lab*np.sinh(eta1),
+                'E2': e2_lab, 'px2': e2_lab*np.cos(phi2)/np.cosh(eta2), 'py2': e2_lab*np.sin(phi2)/np.cosh(eta2), 'pz2': e2_lab*np.sinh(eta2),
+                'E3': e3, 'px3': e3*np.cos(phi3)/np.cosh(eta3), 'py3': e3*np.sin(phi3)/np.cosh(eta3), 'pz3': e3*np.sinh(eta3),
+                'is_signal': 1,
+                'true_pi0_pair': (0,1)
+            })
+        else:
+            # Background: three random photons
+            photons = []
+            for k in range(3):
+                e = np.random.uniform(0.5, 10)
+                eta = np.random.uniform(-2, 2)
+                phi = np.random.uniform(-np.pi, np.pi)
+                photons.extend([e, 
+                              e*np.cos(phi)/np.cosh(eta),
+                              e*np.sin(phi)/np.cosh(eta),
+                              e*np.sinh(eta)])
+            
+            data.append({
+                'event': evt,
+                'E1': photons[0], 'px1': photons[1], 'py1': photons[2], 'pz1': photons[3],
+                'E2': photons[4], 'px2': photons[5], 'py2': photons[6], 'pz2': photons[7],
+                'E3': photons[8], 'px3': photons[9], 'py3': photons[10], 'pz3': photons[11],
+                'is_signal': 0,
+                'true_pi0_pair': (-1,-1)
+            })
+    
+    df = pd.DataFrame(data)
+    print(f"Generated {len(df)} events ({df.is_signal.sum()} signal, {len(df)-df.is_signal.sum()} background)")
+    
+    # Prepare pair dataset with EXACT 4-vector quantities
+    print("\n1. Creating photon pairs with EXACT invariant masses...")
+    pair_df = prepare_3photon_pairs(df)
+    print(f"   {len(pair_df)} pairs created")
+    print(f"   {pair_df.is_pi0.sum()} true π⁰ pairs")
+    
+    # Train classifier
+    print("\n2. Training XGBoost on EXACT 4-vector features...")
+    model = train_pi0_classifier_4vector(pair_df)
+    
+    # Test on a few events
+    print("\n3. Testing on 5 random events:")
+    test_events = df.sample(5)
+    for _, evt in test_events.iterrows():
+        photons = [
+            np.array([evt.E1, evt.px1, evt.py1, evt.pz1]),
+            np.array([evt.E2, evt.px2, evt.py2, evt.pz2]),
+            np.array([evt.E3, evt.px3, evt.py3, evt.pz3])
+        ]
+        
+        best_pair, score, mass = find_best_pi0_candidate(photons, model)
+        truth = f"True π⁰: {evt.true_pi0_pair}" if evt.is_signal else "Background event"
+        print(f"   Event {evt.event}: Best pair {best_pair}, score={score:.3f}, m={mass:.3f} | {truth}")
+    
+    print("\n✅ DONE! You're now using EXACT 4-vector kinematics.")
+    print("\n📌 NEXT: Replace synthetic data with your real ntuple.")
+    print("📌 Change column names in prepare_3photon_pairs() to match your branches.")

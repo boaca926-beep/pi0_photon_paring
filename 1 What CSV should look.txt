@@ -1,0 +1,277 @@
+1. What CSV should look like?
+
+Essential columns for training CSV:
+event_id       # Event identifier (int)
+pair_idx       # Which pair: 0=(0,1), 1=(0,2), 2=(1,2)
+invariant_mass # Mass of photon pair (float)
+mass_diff      # |mass - 135.0| (float)
+total_E        # E1 + E2 (float)
+energy_asym    # |E1 - E2|/(E1 + E2) (float)
+opening_angle  # Angle between photons (float, radians)
+is_true_pi0    # 1 if this is the true π⁰ pair, 0 otherwise (int)
+
+Nice-to-have additional columns:
+photon1_E, photon2_E      # Individual energies
+photon1_eta, photon2_eta  # Pseudorapidities
+photon1_phi, photon2_phi  # Azimuthal angles
+cos_angle                 # Cosine of opening angle
+pt_sum                    # Sum of transverse momenta
+leftover_E                # Energy of third photon
+recoil_mass               # Mass recoiling against tracks+leftover
+track1_px, track1_py, ... # Track momenta
+
+1. Raw Event Data (for inference)
+event_id,photon0_E,photon0_px,photon0_py,photon0_pz,photon0_eta,photon0_phi,photon1_E,photon1_px,...,track0_px,track0_py,track0_pz,track0_charge,track1_px,...
+1,1.5,1.2,0.8,0.5,0.3,0.7,0.9,0.5,0.3,0.6,...,0.4,0.2,0.9,1,0.3,0.1,0.8,-1
+2,2.1,1.8,0.9,0.7,0.4,0.5,1.2,0.9,0.4,0.5,...,0.5,0.3,1.0,1,0.4,0.2,0.7,-1
+
+event_id,process,pair_idx,photon1_idx,photon2_idx,invariant_mass,mass_diff,total_E,energy_asym,opening_angle,cos_angle,pt_sum,leftover_E,recoil_mass,is_true_pi0
+1,omega,0,0,1,134.5,0.5,2.4,0.25,0.18,0.984,2.1,0.7,782.3,0
+
+Interpretation:
+
+    Testing photon pair (γ₀, γ₁) as potential π⁰ candidate
+
+    invariant_mass = 134.5 MeV: Close to π⁰ mass (135 MeV), but...
+
+    mass_diff = 0.5 MeV: Only 0.5 MeV away from 135 MeV
+
+    total_E = 2.4 GeV: Sum of γ₀ + γ₁ energies
+
+    energy_asym = 0.25: 25% energy asymmetry (|E₀ - E₁|/(E₀ + E₁))
+
+    opening_angle = 0.18 rad ≈ 10.3°
+
+    cos_angle = 0.984: Cosine of 0.18 rad
+
+    pt_sum = 2.1 GeV: Transverse momentum of the pair
+
+    leftover_E = 0.7 GeV: Energy of the third photon (γ₂)
+
+    recoil_mass = 782.3 MeV: Mass of (π⁺π⁻ + γ₂) system
+
+    is_true_pi0 = 0: NOT the true π⁰ pair ❌
+
+Analysis: This pair has mass very close to π⁰ (134.5 MeV), but it's WRONG because:
+
+    γ₀ is from π⁰, γ₁ is radiative
+
+    The "leftover" photon (γ₂) is actually the other π⁰ photon
+
+
+import numpy as np
+import pandas as pd
+import xgboost as xgb
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_auc_score
+import warnings
+warnings.filterwarnings('ignore')
+
+# === STEP 1: Prepare your data - SIMPLE ===
+def prepare_pairs(df_events):
+    """
+    Input: DataFrame with columns: event, photon1_E, photon1_eta, photon1_phi,
+                                    photon2_E, photon2_eta, photon2_phi,
+                                    photon3_E, photon3_eta, photon3_phi,
+                                    is_signal (1 if all photons from π⁰, else 0)
+    """
+    pairs = []
+    
+    for _, evt in df_events.iterrows():
+        # Get all 3 photons
+        photons = [
+            {'E': evt.photon1_E, 'eta': evt.photon1_eta, 'phi': evt.photon1_phi, 'idx': 0},
+            {'E': evt.photon2_E, 'eta': evt.photon2_eta, 'phi': evt.photon2_phi, 'idx': 1},
+            {'E': evt.photon3_E, 'eta': evt.photon3_eta, 'phi': evt.photon3_phi, 'idx': 2}
+        ]
+        
+        # Form all 3 possible pairs
+        pair_indices = [(0,1), (0,2), (1,2)]
+        
+        for i, j in pair_indices:
+            p1 = photons[i]
+            p2 = photons[j]
+            
+            # Calculate basic pair features
+            inv_mass = np.sqrt(2 * p1['E'] * p2['E'] * 
+                              (1 - np.cos(deltaR(p1['eta'], p1['phi'], 
+                                                p2['eta'], p2['phi']))))
+            dr = deltaR(p1['eta'], p1['phi'], p2['eta'], p2['phi'])
+            pt_asym = np.abs(p1['E'] - p2['E']) / (p1['E'] + p2['E'])
+            
+            # Is this the correct π⁰ pair? (requires truth info)
+            is_pi0 = 0
+            if 'is_signal' in evt and evt.is_signal == 1:
+                # In signal events, the correct pair is the one with mass closest to π⁰
+                # This is a simplification - adjust based on your truth info
+                if 'pi0_pair' in evt:
+                    is_pi0 = 1 if (i,j) == evt.pi0_pair else 0
+            
+            pairs.append({
+                'event': evt.event,
+                'pair_id': f"{evt.event}_{i}{j}",
+                'm_γγ': inv_mass,
+                'dR': dr,
+                'pt_asym': pt_asym,
+                'E1': p1['E'],
+                'E2': p2['E'],
+                'eta1': p1['eta'],
+                'eta2': p2['eta'],
+                'is_pi0': is_pi0
+            })
+    
+    return pd.DataFrame(pairs)
+
+def deltaR(eta1, phi1, eta2, phi2):
+    dphi = np.abs(phi1 - phi2)
+    dphi = np.where(dphi > np.pi, 2*np.pi - dphi, dphi)
+    return np.sqrt((eta1 - eta2)**2 + dphi**2)
+
+# === STEP 2: Train XGBoost on pairs - SIMPLE ===
+def train_pi0_classifier(pair_df):
+    """Train a classifier to identify which photon pairs are real π⁰s"""
+    
+    # Features: only 3 simple ones!
+    features = ['m_γγ', 'dR', 'pt_asym']
+    X = pair_df[features]
+    y = pair_df['is_pi0']
+    
+    # Split
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+    
+    # Simple XGBoost model - minimal parameters
+    model = xgb.XGBClassifier(
+        n_estimators=100,
+        max_depth=3,           # Shallow trees = simple
+        learning_rate=0.1,
+        subsample=0.8,
+        objective='binary:logistic',
+        eval_metric='auc',
+        use_label_encoder=False,
+        random_state=42
+    )
+    
+    # Train
+    model.fit(X_train, y_train,
+              eval_set=[(X_test, y_test)],
+              verbose=False)
+    
+    # Evaluate
+    y_pred = model.predict_proba(X_test)[:, 1]
+    auc = roc_auc_score(y_test, y_pred)
+    print(f"✓ AUC: {auc:.3f}")
+    
+    # Feature importance
+    importance = model.feature_importances_
+    for f, imp in zip(features, importance):
+        print(f"  {f}: {imp:.3f}")
+    
+    return model
+
+# === STEP 3: Use the classifier on your 3-photon events ===
+def select_best_pi0(event_photons, model):
+    """
+    For a 3-photon event, select the most likely π⁰ pair
+    event_photons: list of [E, eta, phi] for 3 photons
+    Returns: indices of the two photons that form the best π⁰
+    """
+    # Form all 3 pairs
+    pairs = []
+    pair_indices = [(0,1), (0,2), (1,2)]
+    
+    for i, j in pair_indices:
+        p1 = event_photons[i]
+        p2 = event_photons[j]
+        
+        # Calculate features
+        m = np.sqrt(2 * p1[0] * p2[0] * (1 - np.cos(deltaR(p1[1], p1[2], p2[1], p2[2]))))
+        dr = deltaR(p1[1], p1[2], p2[1], p2[2])
+        asym = np.abs(p1[0] - p2[0]) / (p1[0] + p2[0])
+        
+        # Predict π⁰ probability
+        proba = model.predict_proba([[m, dr, asym]])[0, 1]
+        pairs.append({'pair': (i,j), 'score': proba, 'mass': m})
+    
+    # Return the pair with highest score
+    best = max(pairs, key=lambda x: x['score'])
+    return best['pair'], best['score'], best['mass']
+
+# === FULL USAGE EXAMPLE ===
+if __name__ == "__main__":
+    print("="*50)
+    print("SIMPLE XGBOOST FOR 3-PHOTON π⁰ RECONSTRUCTION")
+    print("="*50)
+    
+    # 1. Load your data (ADAPT THIS)
+    # df = pd.read_hdf("your_3photon_events.h5")
+    
+    # 2. Create synthetic data for testing
+    np.random.seed(42)
+    n_events = 1000
+    
+    synthetic_data = []
+    for evt in range(n_events):
+        # Signal: one π⁰ + one extra photon
+        if np.random.random() < 0.5:
+            # π⁰ photon pair
+            e1 = np.random.uniform(2, 10)
+            e2 = np.random.uniform(2, 10)
+            dr = np.random.uniform(0.01, 0.1)
+            # Extra photon
+            e3 = np.random.uniform(1, 5)
+            dr_extra = np.random.uniform(0.2, 0.8)
+            
+            synthetic_data.append({
+                'event': evt,
+                'photon1_E': e1, 'photon1_eta': 0, 'photon1_phi': 0,
+                'photon2_E': e2, 'photon2_eta': 0.01, 'photon2_phi': dr,
+                'photon3_E': e3, 'photon3_eta': 0.1, 'photon3_phi': dr_extra,
+                'is_signal': 1,
+                'pi0_pair': (0,1)
+            })
+        # Background: three random photons
+        else:
+            e1, e2, e3 = np.random.uniform(1, 10, 3)
+            dr1 = np.random.uniform(0.1, 0.5)
+            dr2 = np.random.uniform(0.1, 0.5)
+            
+            synthetic_data.append({
+                'event': evt,
+                'photon1_E': e1, 'photon1_eta': 0, 'photon1_phi': 0,
+                'photon2_E': e2, 'photon2_eta': 0.01, 'photon2_phi': dr1,
+                'photon3_E': e3, 'photon3_eta': 0.1, 'photon3_phi': dr2,
+                'is_signal': 0,
+                'pi0_pair': (-1,-1)
+            })
+    
+    df_events = pd.DataFrame(synthetic_data)
+    print(f"Generated {len(df_events)} test events")
+    
+    # 3. Create pair dataset
+    print("\n1. Creating photon-pair candidates...")
+    pair_df = prepare_pairs(df_events)
+    print(f"   {len(pair_df)} pairs created")
+    print(f"   Signal pairs: {pair_df.is_pi0.sum()} / {len(pair_df)}")
+    
+    # 4. Train classifier
+    print("\n2. Training XGBoost on photon pairs...")
+    model = train_pi0_classifier(pair_df)
+    
+    # 5. Test on a few events
+    print("\n3. Testing on 5 events:")
+    test_events = df_events.sample(5)
+    for _, evt in test_events.iterrows():
+        photons = [
+            [evt.photon1_E, evt.photon1_eta, evt.photon1_phi],
+            [evt.photon2_E, evt.photon2_eta, evt.photon2_phi],
+            [evt.photon3_E, evt.photon3_eta, evt.photon3_phi]
+        ]
+        best_pair, score, mass = select_best_pi0(photons, model)
+        truth = f"True π⁰ pair: {evt.pi0_pair}" if evt.is_signal else "Background"
+        print(f"   Event {evt.event}: Best pair {best_pair}, score={score:.3f}, mass={mass:.3f} | {truth}")
+    
+    print("\n✅ Done! Your simple XGBoost π⁰ classifier is ready.")
+    print("\n📌 NEXT: Replace synthetic data with your real 3-photon events.")
+    print("📌 The model will tell you which photon pair is the π⁰.")
