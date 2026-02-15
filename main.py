@@ -5,7 +5,9 @@ import xgboost as xgb
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score
 import warnings
-from methods import prepare_3photon_paris
+from methods import prepare_3photon_paris, plot_hist
+
+# Based on description from xgboost_pi0_photon_paring
 
 # Photon1_eta is the pseudorapidity of the first photon. dR (or dr) is the angular distance between two photons.
 # Pseudorapidity: Angle relative to the beam pipe. η=0 = perpendicular to beam; η=±∞ = along the beam.
@@ -138,7 +140,15 @@ if __name__ == "__main__":
             })
 
     df = pd.DataFrame(synthetic_data)
+    # columns list with labels only related to photon 4-momentum
+    columns_df = [col for col in df.columns if col not in ['event', 'is_signal', 'true_pi0_pair']]
     print(f"Generated {len(df)} events ({df.is_signal.sum()}) signal, {df.is_signal.sum()} background")
+    print(f"photon 4-mom data set {df.head(5)}")
+    print(f"photon features: {columns_df}")
+    #print(f"photon 4-mom (E, px, py, pz): ({df[]})")
+
+    plot_hist(df, columns_df, 3, 100, "photon_features") # data, column list, number of rows to plot, number of bins
+    
 
     # test methods
     #test_print()
@@ -146,30 +156,57 @@ if __name__ == "__main__":
     # Prepare pair dataset with EXACT 4-vector quantities
     print("\n0. Creating photon pairs with EXACT invariant masses ...")
     pair_df = prepare_3photon_paris(df)
-    print(f"    {len(pair_df)} pairs created")
-    print(f"    {pair_df.is_pi0.sum()} true pi0 pairs")
+    #print(f"    {len(pair_df)} pairs created")
+    #print(f"    {pair_df.is_pi0.sum()} true pi0 pairs")
 
     # Feature ispection: EXACT physics quantities from 4-vectors
     features = ['m_gg']
     X = pair_df[features]
 
-    print(X, "X: ", type(X))
-    print(f"pair_df:    {pair_df.iloc[:, 2]}")
+    #print(X, "X: ", type(X))
+    #print(f"pair_df:    {pair_df.iloc[:, 2]}")
 
     print("\n1. Inspect features ...")
-    print(f"Column name:    {pair_df.columns[:]}")
-    print(pair_df.head(5))
-    print(f"Statistics:\n{pair_df.describe()}")
+    #print(f"# columns ({len(pair_df.columns[:])}); Column name:    {pair_df.columns[:]}")
+    #print(pair_df.head(5))
+    #print(f"Statistics:\n{pair_df.describe()}")
     #print(df.head(10))
     #print(f"Column name: {df.columns[0]}")
     #print(f"Data type: {df.dtypes}")
     #print(f"Statistics:\n{df.describe()}")
     #print("data:", df.shape())
 
-    plt.figure(figsize=(10, 6))
-    plt.hist(pair_df.iloc[:, 3], bins=100, edgecolor='black', alpha=0.7)
-    #plt.hist(X, bins=30, edgecolor='black', alpha=0.7)
+    ## Plot pi0 photon features
+    
+    r'''
+    ## Plot pi0 features
+    columns_to_plot = [col for col in pair_df.columns if col != 'pair_id']
+    n_cols = len(columns_to_plot)
+    print(f"columns_to_plot ({n_cols}): {columns_to_plot}")
+    #color = ["blue", "black", "red", "yellow", "purple", "green", "orange", "brown", "gray", "cyan"]
+    colors = plt.cm.tab10(np.linspace(0, 1, len(columns_to_plot)))  # Generate distinct colors
+    
+    # Create 2x4 subplot grid
+    fig, axes = plt.subplots(2, 4, figsize=(16, 10)) # 2 rows, 4 columns
+    fig.suptitle(r'$\pi^{0}$ photon features', fontsize=16, y=1.02)
+
+    # Flatten axes array for easy iteration
+    axes = axes.flatten()
+    
+    bins = 100
+    for i, label in enumerate(columns_to_plot[:8]):
+        print(i, label)
+        axes[i].hist(pair_df[label], color=colors[i], bins=bins, density=True, edgecolor='black', alpha=0.7)
+        axes[i].set_title(label, fontsize=12)
+        axes[i].set_xlabel(label)
+        axes[i].set_ylabel(None)
+        axes[i].grid(True, alpha=0.3)
+
+    plt.savefig('features.png', dpi=300, bbox_inches='tight')
+    plt.tight_layout()
     plt.show()
+    plt.close()
 
     # Train classifier
     print("\n2. Training XGBoost on EXACT 4-vector features ...")
+    '''

@@ -1,12 +1,11 @@
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 
-def test_print():
-    print("\n All methods used in pi0 photon paring are stored here!")
 
-'''
-    Calculate invariant mass CORRECTLY from 4-vectors
-'''
+# =================================================================
+# Physics METHOD
+# =================================================================
 def inv_mass_4vector(p1, p2):
     """
     Calculate diphoton invariant mass from two photon 4-vectors.
@@ -31,11 +30,6 @@ def inv_mass_4vector(p1, p2):
         # (e.g., ROOT.TLorentzVector, vector.obj, etc.)
         return (p1 + p2).M()
     
-
-
-'''
-    For 3-photon events, create ALL pairs with EXACT masses
-'''
 def prepare_3photon_paris(df_events):
     """
     Convert 3-photon events into training paris with EXACT invariant masses.
@@ -74,9 +68,17 @@ def prepare_3photon_paris(df_events):
             p2_mag = np.sqrt(np.maximum(0., photons[j][1]**2 + photons[j][2]**2 + photons[j][3]**2))
             dot_product = photons[i][1] * photons[j][1] + photons[i][2] * photons[j][2] + photons[i][3] * photons[j][3]
             cos_theta = dot_product / (p1_mag * p2_mag + 1e-10) # 1e-10 avoid divide zero
-            theta = np.arccos(np.clip(cos_theta, -1, -1))
+            theta = np.arccos(np.clip(cos_theta, -1, 1))
+            #print(f"p1_mag = {p1_mag}, p2_mag = {p2_mag}")
+            #print(f"dot_product = {dot_product}, cos_theta = {cos_theta}")
+            #print(f"{np.clip(cos_theta, -1, -1)}")
+            #print(f"theta = {theta}")
 
             # Energy asymmetry
+            e1 = photons[i][0]
+            e2 = photons[j][0]
+            pt_asym = np.abs(e1 - e2) / (e1 + e2 + 1e-10)
+            #print(f"p_asym = {pt_asym}")
 
             # Is this the correct pi0 pair? (require truth info)
             is_pi0 = 0
@@ -93,8 +95,90 @@ def prepare_3photon_paris(df_events):
                 'event': evt.event,
                 'pair_id': f"{evt.event}_{i}{j}",
                 'm_gg': mass,
+                'opening_angle': theta, # opening angle in radians
                 'cos_theta': cos_theta,
+                'pt_asym': pt_asym,
+                'E1': e1,
+                'E2': e2,
                 'is_pi0': is_pi0
             })
     
     return pd.DataFrame(pairs)
+
+# =================================================================
+# PLOT METHOD
+# =================================================================
+
+def plot_hist(df, columns_df, rows, bins, plot_nm):
+    
+    col_len = len(columns_df) # length of columns of df
+
+    # check col_len
+    if (col_len < 0):
+        # negative
+        print(f"Negative col_len ({col_len})")
+        return
+    elif (col_len == 0):
+        # zero col_len
+        print(f"Zero col_len ({col_len})")
+    else:
+        # postive
+        if (col_len % 2 == 0):
+            # even case
+            print(f"good even col_len ({col_len})")
+        else:
+            # odd or not integer
+            print(f"odd col_len or none integer col_len ({col_len})")
+        
+    # Create 2x4 subplot grid
+    plot_col = int(col_len / rows) # number of rows and columns to the plot
+    fig, axes = plt.subplots(rows, plot_col, figsize=(16, 10)) # rows and columns to subplots
+    fig.suptitle(r'$\pi^{0}$ photon features', fontsize=16, y=1.02)
+    colors = plt.cm.tab10(np.linspace(0, 1, col_len))  # Generate distinct colors
+    #print(f"columns list ({col_len}); plot {rows}x{plot_col}")
+
+    # Flatten axes array for easy iteration
+    axes = axes.flatten()
+
+    for i, label in enumerate(columns_df[:col_len]):
+        print(i, label)
+        axes[i].hist(df[label], color=colors[i], bins=bins, label=label,density=True, edgecolor='black', alpha=0.7)
+        #axes[i].set_title(label, fontsize=12)
+        axes[i].set_xlabel(label)
+        axes[i].set_ylabel(None)
+        axes[i].grid(True, alpha=0.3)
+        axes[i].legend(loc='best', fontsize=8) 
+    plt.tight_layout()
+    plt.savefig(plot_nm + '.png', dpi=300, bbox_inches='tight')
+    plt.show()
+    plt.close()
+
+r'''
+    ## Plot pi0 features
+    columns_to_plot = [col for col in pair_df.columns if col != 'pair_id']
+    n_cols = len(columns_to_plot)
+    print(f"columns_to_plot ({n_cols}): {columns_to_plot}")
+    #color = ["blue", "black", "red", "yellow", "purple", "green", "orange", "brown", "gray", "cyan"]
+    colors = plt.cm.tab10(np.linspace(0, 1, len(columns_to_plot)))  # Generate distinct colors
+    
+    # Create 2x4 subplot grid
+    fig, axes = plt.subplots(2, 4, figsize=(16, 10)) # 2 rows, 4 columns
+    fig.suptitle(r'$\pi^{0}$ photon features', fontsize=16, y=1.02)
+
+    # Flatten axes array for easy iteration
+    axes = axes.flatten()
+    
+    bins = 100
+    for i, label in enumerate(columns_to_plot[:8]):
+        print(i, label)
+        axes[i].hist(pair_df[label], color=colors[i], bins=bins, density=True, edgecolor='black', alpha=0.7)
+        axes[i].set_title(label, fontsize=12)
+        axes[i].set_xlabel(label)
+        axes[i].set_ylabel(None)
+        axes[i].grid(True, alpha=0.3)
+
+    plt.savefig('features.png', dpi=300, bbox_inches='tight')
+    plt.tight_layout()
+    plt.show()
+    plt.close()
+'''
