@@ -147,17 +147,18 @@ if __name__ == "__main__":
     print(f"photon features: {columns_df}")
     #print(f"photon 4-mom (E, px, py, pz): ({df[]})")
 
+    # plot 3 photon 4-momentum
     plot_hist(df, columns_df, 3, 100, "photon_features") # data, column list, number of rows to plot, number of bins
-    
 
-    # test methods
-    #test_print()
-
-    # Prepare pair dataset with EXACT 4-vector quantities
+     # Prepare pair dataset with EXACT 4-vector quantities
     print("\n0. Creating photon pairs with EXACT invariant masses ...")
     pair_df = prepare_3photon_paris(df)
+    columns_pair_df = [col for col in pair_df.columns if col != 'pair_id']
+
     #print(f"    {len(pair_df)} pairs created")
     #print(f"    {pair_df.is_pi0.sum()} true pi0 pairs")
+    print(f"    Cloumns: {columns_pair_df}")
+    plot_hist(pair_df, columns_pair_df, 2, 100, "pair_features")
 
     # Feature ispection: EXACT physics quantities from 4-vectors
     features = ['m_gg']
@@ -169,7 +170,7 @@ if __name__ == "__main__":
     print("\n1. Inspect features ...")
     #print(f"# columns ({len(pair_df.columns[:])}); Column name:    {pair_df.columns[:]}")
     #print(pair_df.head(5))
-    #print(f"Statistics:\n{pair_df.describe()}")
+    print(f"Statistics:\n{pair_df.describe()}")
     #print(df.head(10))
     #print(f"Column name: {df.columns[0]}")
     #print(f"Data type: {df.dtypes}")

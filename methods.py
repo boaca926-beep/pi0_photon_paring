@@ -142,15 +142,18 @@ def plot_hist(df, columns_df, rows, bins, plot_nm):
 
     for i, label in enumerate(columns_df[:col_len]):
         print(i, label)
-        axes[i].hist(df[label], color=colors[i], bins=bins, label=label,density=True, edgecolor='black', alpha=0.7)
+        # desity=True normalized
+        axes[i].hist(df[label], color=colors[i], bins=bins, label=label, density=False, edgecolor='black', alpha=0.7)
         #axes[i].set_title(label, fontsize=12)
         axes[i].set_xlabel(label)
         axes[i].set_ylabel(None)
         axes[i].grid(True, alpha=0.3)
         axes[i].legend(loc='best', fontsize=8) 
+        axes[i].set_yscale('log')  # <-- LOG SCALE ON Y-AXIS
+        
     plt.tight_layout()
     plt.savefig(plot_nm + '.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.show(block=False)
     plt.close()
 
 r'''
