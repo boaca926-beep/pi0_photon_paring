@@ -6,6 +6,116 @@ from sklearn.metrics import roc_auc_score, roc_curve
 from sklearn.model_selection import train_test_split
 
 # =================================================================
+# Testing data, simplified pi0 -> gamma gamma MC generator
+# =================================================================
+def MC_generation():
+    """
+    Create synthetic data for testing
+    """
+
+    np.random.seed(42)
+    n_events = 1000
+    print(f"Total number of events: {n_events}")
+
+    #global synthetic_data
+    synthetic_data = []
+    for evt in range(n_events):
+        # Signal: one pi0 + one extra photon
+        if np.random.random() < 0.5:
+            # pi0 at rest in its own frame, then boosted
+            m_pi0 = 0.135
+            #print(f"pi0 mass = {m_pi0} GeV")
+
+            # Generate pi0 with some momentum
+            pi0_pt = np.random.uniform(1, 10)
+            pi0_eta = np.random.uniform(-1, 1)
+            pi0_phi = np.random.uniform(-np.pi, np.pi)
+            #print(f"pi0: (pt, eta, phi) = ({pi0_pt}, {pi0_eta}, {pi0_phi})")
+
+            # Decay in rest frame: back-to-back photons
+            # Then boost to lab frame
+            # This is simplifed - in reality use proper decay generator
+            # pi0 photon pair
+            pi0_p = pi0_pt * np.cosh(pi0_eta) # momentum magnitude
+            pi0_E = np.sqrt(m_pi0**2 + pi0_p**2)
+
+            # Photon energies (simplified - equal sharing)
+            e1_lab = pi0_E / 2
+            e2_lab = pi0_E / 2
+
+            # Approximate directions (small opening angle in lab)
+            # Opening angle that guarantees m_gg = m_pi0
+            dr = 2 * m_pi0 / pi0_E # approximation: theta = m/p
+
+            # Photon directions
+            phi1 = pi0_phi
+            phi2 = pi0_phi + dr
+            eta1 = pi0_eta
+            eta2 = pi0_eta + dr / 2
+
+            # Extra random photon
+            e3 = np.random.uniform(0.5, 5)
+            eta3 = np.random.uniform(-2, 2)
+            phi3 = np.random.uniform(-np.pi, np.pi)
+
+            # Convert (pt, eta, phi) to (E, px, py, pz)
+            px1 = e1_lab * np.cos(phi1) / np.cosh(eta1)
+            py1 = e1_lab * np.sin(phi1) / np.cosh(eta1)
+            pz1 = e1_lab * np.sinh(eta1) / np.cosh(eta1)
+
+            px2 = e2_lab * np.cos(phi2) / np.cosh(eta2)
+            py2 = e2_lab * np.sin(phi2) / np.cosh(eta2)
+            pz2 = e2_lab * np.sinh(eta2) / np.cosh(eta2)
+
+            px3 = e3 * np.cos(phi3) / np.cosh(eta3)
+            py3 = e3 * np.sin(phi3) / np.cosh(eta3)
+            pz3 = e3 * np.sinh(eta3) / np.cosh(eta3)
+
+            # Check m_gg
+            ee = e1_lab + e2_lab
+            pxx = px1 + px2
+            pyy = py1 + py2
+            pzz = pz1 + pz2
+            mass_squared = ee**2 - (pxx**2 + pyy**2 + pzz**2)
+            mass_pi0 = np.sqrt(np.maximum(0, mass_squared))
+            #print(f"ee  {ee}; mass_pi0  {mass_pi0}")  
+
+            # Data
+            synthetic_data.append({
+                'event': evt,
+                'E1': e1_lab, 'px1': px1, 'py1': py1, 'pz1': pz1,
+                'E2': e2_lab, 'px2': px2, 'py2': py2, 'pz2': pz2,
+                'E3': e3, 'px3': px3, 'py3': py3, 'pz3': pz3,
+                'is_signal': 1,
+                'true_pi0_pair': (0, 1) # pion photon index
+            })
+            # print(f"e1 = {e1}, e1 = {e2}, dr = {dr}, e3 = {e3}, dr_extra = {dr_extra}")
+        else:
+            # Background: three random photon final state
+            photons = []
+            for k in range(3):
+                e = np.random.uniform(0.5, 10)
+                eta = np.random.uniform(-2, 2)
+                phi = np.random.uniform(-np.pi, np.pi)
+                photons.extend([e,
+                                e * np.cos(phi) / np.cosh(eta),
+                                e * np.sin(phi) / np.cosh(eta),
+                                e * np.sinh(eta) / np.cosh(eta)   
+                ])
+        
+            synthetic_data.append({
+                'event': evt,
+                'E1': photons[0], 'px1': photons[1], 'py1': photons[2], 'pz1': photons[3],
+                'E2': photons[4], 'px2': photons[5], 'py2': photons[6], 'pz2': photons[7],
+                'E3': photons[8], 'px3': photons[9], 'py3': photons[10], 'pz3': photons[11],
+                'is_signal': 0,
+                'true_pi0_pair': (-1, -1)
+            })
+
+    return synthetic_data
+
+
+# =================================================================
 # For a NEW 3-photon event, pick the best pi0 candidate
 # =================================================================
 def find_best_pi0_candidate(photon_4vectors, model):
@@ -67,7 +177,7 @@ def train_pi0_classifier_4vector(pair_df):
     X = pair_df[features]
     y = pair_df['is_pi0']
 
-    print(y[y == 1], "y: ", type(y), "n_ones = ", sum(y == 1))
+    #print(y[y == 1], "y: ", type(y), "n_ones = ", sum(y == 1)) # print only signal events
     #print(X, "X: ", type(X))
     #print(f"pair_df:    {pair_df.iloc[:, 2]}")
 
@@ -127,6 +237,9 @@ def inv_mass_4vector(p1, p2):
         mass_squared = e**2 - (px**2 + py**2 + pz**2)
         # Ensure non-negative before sqrt
         return np.sqrt(np.maximum(0., mass_squared))
+        #if (mass_squared < 0):
+            #print(f"mass_squared    {mass_squared}")
+        #return np.sqrt(mass_squared)
     else:   
         # Use your experiment's Lorentz vector class
         # (e.g., ROOT.TLorentzVector, vector.obj, etc.)
@@ -257,7 +370,7 @@ def plot_hist(df, columns_df, rows, bins, plot_nm):
         #axes[i].set_yscale('log')  # <-- LOG SCALE ON Y-AXIS
         
     plt.tight_layout()
-    plt.savefig(plot_nm + '.png', dpi=300, bbox_inches='tight')
+    plt.savefig('./plots/' + plot_nm + '.png', dpi=300, bbox_inches='tight')
     plt.show(block=False)
     plt.close()
 

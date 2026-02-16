@@ -4,7 +4,8 @@ import numpy as np
 import xgboost as xgb
 from sklearn.metrics import roc_auc_score
 import warnings
-from methods import prepare_3photon_paris, plot_hist, find_best_pi0_candidate, train_pi0_classifier_4vector
+from methods import prepare_3photon_paris, plot_hist, find_best_pi0_candidate, train_pi0_classifier_4vector, MC_generation
+import seaborn as sns
 
 # Based on description from xgboost_pi0_photon_paring
 
@@ -54,102 +55,11 @@ if __name__ == "__main__":
     print("SIMPLE XGBOOST FOR 3-PHOTON pi0 RECONSTRUCTION")
     print("="*50)
 
-    # Create synthetic data for testing
-    np.random.seed(42)
-    n_events = 1000
-    print(f"Total number of events: {n_events}")
- 
-    global synthetic_data
-    synthetic_data = []
-    for evt in range(n_events):
-        # Signal: one pi0 + one extra photon
-        if np.random.random() < 0.5:
-            # pi0 at rest in its own frame, then boosted
-            m_pi0 = 0.135
-            #print(f"pi0 mass = {m_pi0} GeV")
+    synthetic_data = MC_generation()
+    synthetic_df = pd.DataFrame(synthetic_data) 
+    print(synthetic_df.head(5))
 
-            # Generate pi0 with some momentum
-            pi0_pt = np.random.uniform(1, 10)
-            pi0_eta = np.random.uniform(-1, 1)
-            pi0_phi = np.random.uniform(-np.pi, np.pi)
-            #print(f"pi0: (pt, eta, phi) = ({pi0_pt}, {pi0_eta}, {pi0_phi})")
-
-            # Decay in rest frame: back-to-back photons
-            # Then boost to lab frame
-            # This is simplifed - in reality use proper decay generator
-            # pi0 photon pair
-            pi0_p = pi0_pt * np.cosh(pi0_eta) # momentum magnitude
-            pi0_E = np.sqrt(np.maximum(0, m_pi0**2 + pi0_p**2))
-            e1_lab = pi0_E / 2
-            e2_lab = pi0_E / 2
-
-            # Approximate directions (small opening angle in lab)
-            dr = 2 * m_pi0 / pi0_E # approximation: theta = m/p
-            phi1 = pi0_phi
-            phi2 = pi0_phi + dr
-            eta1 = pi0_eta
-            eta2 = pi0_eta + dr / 2
-
-            # Extra random photon
-            e3 = np.random.uniform(0.5, 5)
-            eta3 = np.random.uniform(-2, 2)
-            phi3 = np.random.uniform(-np.pi, np.pi)
-
-            # Convert (pt, eta, phi) to (E, px, py, pz)
-            px1 = e1_lab * np.cos(phi1) / np.cosh(eta1)
-            py1 = e1_lab * np.sin(phi1) / np.cosh(eta1)
-            pz1 = e1_lab * np.sinh(eta1)
-
-            px2 = e2_lab * np.cos(phi2) / np.cosh(eta2)
-            py2 = e2_lab * np.sin(phi2) / np.cosh(eta2)
-            pz2 = e2_lab * np.sinh(eta2)
-
-            px3 = e3 * np.cos(phi3) / np.cosh(eta3)
-            py3 = e3 * np.sin(phi3) / np.cosh(eta3)
-            pz3 = e3 * np.sinh(eta3)
-
-            # Check m_gg
-            ee = e1_lab + e2_lab
-            pxx = px1 + px2
-            pyy = py1 + py2
-            pzz = pz1 + pz2
-            mass_squared = ee**2 - (pxx**2 + pyy**2 + pzz**2)
-            mass_pi0 = np.sqrt(np.maximum(0, mass_squared))
-            print(f"ee  {ee}; mass_pi0  {mass_pi0}")  
-
-            # Data
-            synthetic_data.append({
-                'event': evt,
-                'E1': e1_lab, 'px1': px1, 'py1': py1, 'pz1': pz1,
-                'E2': e2_lab, 'px2': px2, 'py2': py2, 'pz2': pz2,
-                'E3': e3, 'px3': px3, 'py3': py3, 'pz3': pz3,
-                'is_signal': 1,
-                'true_pi0_pair': (0,1)
-            })
-            # print(f"e1 = {e1}, e1 = {e2}, dr = {dr}, e3 = {e3}, dr_extra = {dr_extra}")
-        else:
-            # Background: three random photon final state
-            photons = []
-            for k in range(3):
-                e = np.random.uniform(0.5, 10)
-                eta = np.random.uniform(-2, 2)
-                phi = np.random.uniform(-np.pi, np.pi)
-                photons.extend([e,
-                                e * np.cos(phi) / np.cosh(eta),
-                                e * np.sin(phi) / np.cosh(eta),
-                                e * np.sinh(eta)    
-                ])
-        
-            synthetic_data.append({
-                'event': evt,
-                'E1': photons[0], 'px1': photons[1], 'py1': photons[2], 'pz1': photons[3],
-                'E2': photons[4], 'px2': photons[5], 'py2': photons[6], 'pz2': photons[7],
-                'E3': photons[8], 'px3': photons[9], 'py3': photons[10], 'pz3': photons[11],
-                'is_signal': 0,
-                'true_pi0_pair': (-1, -1)
-            })
-
-    df = pd.DataFrame(synthetic_data)
+    df = pd.DataFrame(synthetic_data) # read data to DataFrame: 1. synthetic_data (testing data); 2. kloe_data (MC and data from the KLOE 3pi analysis)
     # columns list with labels only related to photon 4-momentum
     columns_df = [col for col in df.columns if col not in ['event', 'is_signal', 'true_pi0_pair']]
     print(f"Generated {len(df)} events ({df.is_signal.sum()}) signal, {df.is_signal.sum()} background")
@@ -173,7 +83,7 @@ if __name__ == "__main__":
     plot_hist(pair_df, columns_pair_df, 2, 100, "pair_features")
 
     print("\n1. Inspect features ...")
-    #print(f"# columns ({len(pair_df.columns[:])}); Column name:    {pair_df.columns[:]}")
+    print(f"# columns ({len(pair_df.columns[:])}); Column name:    {pair_df.columns[:]}")
     #print(pair_df.head(5))
     #print(f"Statistics:\n{pair_df.describe()}")
     #print(df.head(10))
@@ -182,6 +92,43 @@ if __name__ == "__main__":
     #print(f"Statistics:\n{df.describe()}")
     #print("data:", df.shape())
 
+    # Paire plot (Scatter Matrix) correlations
+    sample_size = min (1000, len(pair_df))
+    sample_df = pair_df.sample(sample_size)
+    print(sample_df.head(5))
+
+    # Create pair plot
+    #('m_gg', 'opening_angle'),      # Should be correlated (higher mass = larger opening angle)
+    #('m_gg', 'pt_asym'),             # Check if mass correlates with asymmetry
+    #('opening_angle', 'pt_asym'),    # Opening angle vs energy asymmetry
+    #('cos_theta', 'opening_angle'),  # These are directly related
+    #('E1', 'E2'),                    # Photon energies (should be anti-correlated for π⁰)
+    feature_columns = ['m_gg', 'opening_angle', 'cos_theta', 'pt_asym', 'E1', 'E2']
+    g = sns.pairplot(sample_df[feature_columns + ['is_pi0']], # Data
+                     hue = 'is_pi0', # Color grouping, points by the values in the 'is_pi0' column
+                     palette={1: 'blue', 0: 'red'}, # 3. colors     
+                     diag_kind='hist', # Diagonal plot type
+                     plot_kws={'alpha': 0.5, 's': 10}, # Scatter plot options
+                     diag_kws={'alpha': 0.7, 'edgecolor': 'black'} # Histogram options  
+    )
+    g.figure.suptitle('Feature Pair Plot (Signal=Blue, Background=Red)', y=1.02, fontsize=14)
+    plt.tight_layout()
+    plt.savefig('./plots/feature_pairplot.png', dpi=300, bbox_inches='tight')
+    plt.show()
+
+    # Check signal pi0 mass
+
+    signal_pi0_mass = pair_df[(pair_df['is_pi0'] == 1) & (pair_df['m_gg'] > 0.1)]['m_gg'].tolist()
+    #print(signal_pi0_mass)
+    plt.hist(signal_pi0_mass, color='Black', bins=100, density=False, edgecolor='black', alpha=0.7)
+    plt.xlabel(r'$m_{\gamma\gamma}$ (GeV)')
+    plt.ylabel('Events')
+    plt.title(f'π⁰ Mass Distribution (n={len(signal_pi0_mass)})')
+    plt.grid(True, alpha=0.3)
+    plt.savefig('./plots/signal_pi0.png')
+    plt.show(block=False)
+    plt.close()
+        
     # Train classifier
     print("\n2. Training XGBoost on EXACT 4-vector features ...")
     model = train_pi0_classifier_4vector(pair_df)
@@ -190,6 +137,7 @@ if __name__ == "__main__":
     print("\n3. Testing on 5 random events:")
     test_events = df.sample(50)
     for _, evt in test_events.iterrows():
+        # evt is a list object
         photons = [
             np.array([evt.E1, evt.px1, evt.py1, evt.pz1]),
             np.array([evt.E2, evt.px2, evt.py2, evt.pz2]),
@@ -198,4 +146,4 @@ if __name__ == "__main__":
 
         best_pair, score, mass = find_best_pi0_candidate(photons, model)
         truth = f"True pi0: {evt.true_pi0_pair}" if evt.is_signal else "Background event"
-        print(f"   Event {evt.event}: Best pair {best_pair}, score={score:.3f}, m={mass:.3f} | {truth}")
+        #print(f"   Event {evt.event}: Best pair {best_pair}, score={score:.3f}, m={mass:.3f} | {truth}")
