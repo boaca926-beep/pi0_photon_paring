@@ -67,10 +67,10 @@ if __name__ == "__main__":
     print(f"photon features: {columns_df}")
     #print(f"photon 4-mom (E, px, py, pz): ({df[]})")
 
-    # plot 3 photon 4-momentum
+    ## Plot 3 photon 4-momentum
     plot_hist(df, columns_df, 3, 100, "photon_features") # data, column list, number of rows to plot, number of bins
 
-    # Prepare pair dataset with EXACT 4-vector quantities
+    ## Prepare pair dataset with EXACT 4-vector quantities
     print("\n0. Creating photon pairs with EXACT invariant masses ...")
     pair_df = prepare_3photon_paris(df)
     columns_pair_df = [col for col in pair_df.columns if col != 'pair_id']
@@ -79,7 +79,19 @@ if __name__ == "__main__":
     #print(f"    {pair_df.is_pi0.sum()} true pi0 pairs")
     print(f"    Cloumns: {columns_pair_df}")
     
-    # plot photon pair features
+    ## Check signal pi0 mass
+    signal_pi0_mass = pair_df[(pair_df['is_pi0'] == 1) & (pair_df['m_gg'] > 0.1)]['m_gg'].tolist()
+    #print(signal_pi0_mass)
+    plt.hist(signal_pi0_mass, color='Black', bins=100, density=False, edgecolor='black', alpha=0.7)
+    plt.xlabel(r'$m_{\gamma\gamma}$ (GeV)')
+    plt.ylabel('Events')
+    plt.title(f'π⁰ Mass Distribution (n={len(signal_pi0_mass)})')
+    plt.grid(True, alpha=0.3)
+    plt.savefig('./plots/signal_pi0.png')
+    plt.show(block=False)
+    plt.close()
+
+    ## Plot photon pair features
     plot_hist(pair_df, columns_pair_df, 2, 100, "pair_features")
 
     print("\n1. Inspect features ...")
@@ -92,12 +104,11 @@ if __name__ == "__main__":
     #print(f"Statistics:\n{df.describe()}")
     #print("data:", df.shape())
 
-    # Paire plot (Scatter Matrix) correlations
+    ## Pair plot (Scatter Matrix) correlations
     sample_size = min (1000, len(pair_df))
     sample_df = pair_df.sample(sample_size)
     print(sample_df.head(5))
 
-    # Create pair plot
     #('m_gg', 'opening_angle'),      # Should be correlated (higher mass = larger opening angle)
     #('m_gg', 'pt_asym'),             # Check if mass correlates with asymmetry
     #('opening_angle', 'pt_asym'),    # Opening angle vs energy asymmetry
@@ -114,21 +125,79 @@ if __name__ == "__main__":
     g.figure.suptitle('Feature Pair Plot (Signal=Blue, Background=Red)', y=1.02, fontsize=14)
     plt.tight_layout()
     plt.savefig('./plots/feature_pairplot.png', dpi=300, bbox_inches='tight')
-    plt.show()
-
-    # Check signal pi0 mass
-
-    signal_pi0_mass = pair_df[(pair_df['is_pi0'] == 1) & (pair_df['m_gg'] > 0.1)]['m_gg'].tolist()
-    #print(signal_pi0_mass)
-    plt.hist(signal_pi0_mass, color='Black', bins=100, density=False, edgecolor='black', alpha=0.7)
-    plt.xlabel(r'$m_{\gamma\gamma}$ (GeV)')
-    plt.ylabel('Events')
-    plt.title(f'π⁰ Mass Distribution (n={len(signal_pi0_mass)})')
-    plt.grid(True, alpha=0.3)
-    plt.savefig('./plots/signal_pi0.png')
     plt.show(block=False)
     plt.close()
-        
+
+    ## Feature-feature correlations
+    print("Feature-feature correlations:")
+    corr_matrix = pair_df[feature_columns].corr()
+
+    # find highly correlated feature pairs
+    high_corr = []
+    for i in range(len(feature_columns)):
+        for j in range(i+1, len(feature_columns)):
+            #print(f"{i}, {j}")
+            corr = corr_matrix.iloc[i, j]
+            if abs(corr) > 0.7:
+                high_corr.append((feature_columns[i], feature_columns[j], corr))
+    
+    print(type(high_corr[0]), type(high_corr))
+
+    if high_corr:
+        print("    Highly correlated pairs (>0.7):")
+        for f1, f2, corr in high_corr:
+            print(f"    {f1} & {f2}: {corr:+.3f}")
+    else:
+        print("    No highly correlated feature pairs (>0.7)")
+
+    ## Correlations with target
+    target = 'is_pi0' # This is what we are trying to predict - whether a photon pair comes from a real pi0 decay or is ust random background
+    # is_pi0 = 1: Signal events (the photon pair is a real pi0 decay)
+    # is_pi0 = 0: Background event (random photon combination)
+
+    # Expected correlation for good pi0 data
+    # m_gg              strong positive (+0.8+)     pi0 events peak at 0.135 GeV
+    # opening_angle     strong negaitive (-0.7+)    pi0 have small opening angles
+    # cos_theta         strong positive (+0.7+)     small angle -> costheta close to 1
+    # pt_asym           strong negative (-0.6+)     pi0 decays are symmetric
+    # E1, E2            moderate                    individual energies less discriminating
+     
+    target_corr = pair_df[feature_columns + [target]].corr()[target].drop(target).sort_values(ascending=False)
+    # pair_df[feature_columns + [target]]: select columns
+    # .corr(): calculate correlation matrix
+    # [target]: extract target column
+    # .drop(target): remove self-correlation
+    # .sort_values(ascending=False): sort by strength; False: highest to lowest correlation
+
+    print(f"target_corr type: {type(target_corr), {target_corr.shape}}")
+    #print(target_corr)
+
+   
+    for feat, corr in target_corr.items():
+        strength = "strong" if abs(corr) > 0.5 else "moderate" if abs(corr) > 0.3 else "weak"
+        print(f"    {feat:15s}: {corr:+.3f} ({strength})")
+
+    ## Visualize feature correlation with pi0 signal
+    plt.figure(figsize=(10, 6))
+    colors = ['green' if c > 0  else 'red' for c in target_corr.values]
+    plt.bar(range(len(target_corr)), target_corr.values, color=colors, alpha=0.7)
+    plt.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+    plt.xticks(range(len(target_corr)), target_corr.index, rotation=45, ha='right')
+    plt.ylabel('Correlation with is_pi0')
+    plt.title('Feature Importance: Correlation with pi0 Signal')
+    plt.grid(True, alpha=0.3, axis='y')
+
+    # Add value labels
+    for i, (feat, corr) in enumerate(target_corr.items()):
+        #print (i, feat, corr)
+        plt.text(i, corr + (0.02 if corr > 0 else -0.05),
+                 f'{corr:.2f}', ha='center', va='bottom' if corr > 0 else 'top')
+    
+    plt.tight_layout()
+    plt.savefig('./plots/feature_target_correlation.png', dpi=300, bbox_inches='tight')
+    plt.show(block=False)
+    plt.close()
+
     # Train classifier
     print("\n2. Training XGBoost on EXACT 4-vector features ...")
     model = train_pi0_classifier_4vector(pair_df)

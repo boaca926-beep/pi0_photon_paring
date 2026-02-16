@@ -302,3 +302,56 @@ if __name__ == "__main__":
     print("\n✅ DONE! You're now using EXACT 4-vector kinematics.")
     print("\n📌 NEXT: Replace synthetic data with your real ntuple.")
     print("📌 Change column names in prepare_3photon_pairs() to match your branches.")
+    
+    def print_correlation_summary(df, features, target='is_pi0'):
+    """Print detailed correlation analysis"""
+    
+    print("=" * 60)
+    print("FEATURE CORRELATION ANALYSIS")
+    print("=" * 60)
+    
+    # 1. Correlations with target
+    print("\n1. Correlation with target (is_pi0):")
+    target_corr = df[features + [target]].corr()[target].drop(target).sort_values(ascending=False)
+    for feat, corr in target_corr.items():
+        strength = "strong" if abs(corr) > 0.5 else "moderate" if abs(corr) > 0.3 else "weak"
+        print(f"   {feat:15s}: {corr:+.3f} ({strength})")
+    
+    # 2. Feature-feature correlations
+    print("\n2. Feature-feature correlations:")
+    corr_matrix = df[features].corr()
+    
+    # Find highly correlated feature pairs
+    high_corr = []
+    for i in range(len(features)):
+        for j in range(i+1, len(features)):
+            corr = corr_matrix.iloc[i, j]
+            if abs(corr) > 0.7:
+                high_corr.append((features[i], features[j], corr))
+    
+    if high_corr:
+        print("   Highly correlated pairs (>0.7):")
+        for f1, f2, corr in high_corr:
+            print(f"     {f1} & {f2}: {corr:.3f}")
+    else:
+        print("   No highly correlated feature pairs (>0.7)")
+    
+    # 3. Variance Inflation Factor (VIF) - multicollinearity
+    try:
+        from statsmodels.stats.outliers_influence import variance_inflation_factor
+        
+        print("\n3. Variance Inflation Factor (VIF):")
+        X = df[features].values
+        vif_data = pd.DataFrame()
+        vif_data["Feature"] = features
+        vif_data["VIF"] = [variance_inflation_factor(X, i) for i in range(len(features))]
+        
+        for _, row in vif_data.iterrows():
+            vif = row['VIF']
+            comment = "High multicollinearity" if vif > 10 else "Moderate" if vif > 5 else "Low"
+            print(f"   {row['Feature']:15s}: {vif:.2f} ({comment})")
+    except ImportError:
+        print("   (Install statsmodels for VIF calculation)")
+
+# Use it
+print_correlation_summary(pair_df, feature_columns)
