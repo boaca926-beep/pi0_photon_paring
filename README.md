@@ -21,8 +21,8 @@ This project applies machine learning (XGBoost) to improve signal-background sep
 
 ### Data Generation
 Currently using a simplified MC generator that simulates:
-- Signal events: [describe your signal process]
-- Background events: [describe background sources]
+- Signal events: [true pi0 decay photons]
+- Background events: [random photon background]
 
 *Note: Real KLOE data will be incorporated once project approval is obtained.*
 
@@ -35,6 +35,6 @@ Currently using a simplified MC generator that simulates:
 ## 🛠️ Installation
 
 ```bash
-git clone https://github.com/[username]/kloe-ml-analysis.git
-cd kloe-ml-analysis
+git clone https://github.com/boaca926-beep/pi0_photon_paring.git
+cd pi0_photon_paring
 pip install -r requirements.txt
