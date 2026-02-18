@@ -77,15 +77,22 @@ if __name__ == "__main__":
 
     #print(f"    {len(pair_df)} pairs created")
     #print(f"    {pair_df.is_pi0.sum()} true pi0 pairs")
-    print(f"    Cloumns: {columns_pair_df}")
+    #print(f"    Cloumns: {columns_pair_df}")
+    print(f"    {pair_df.head(6)}")
     
     ## Check signal pi0 mass
     signal_pi0_mass = pair_df[(pair_df['is_pi0'] == 1) & (pair_df['m_gg'] > 0.1)]['m_gg'].tolist()
     #print(signal_pi0_mass)
-    plt.hist(signal_pi0_mass, color='Black', bins=100, density=False, edgecolor='black', alpha=0.7)
+    plt.hist(signal_pi0_mass, color='Black', bins=100, density=False, edgecolor='black', alpha=0.7, label=r'Reconstructed $\pi^{0}$')
     plt.xlabel(r'$m_{\gamma\gamma}$ (GeV)')
     plt.ylabel('Events')
-    plt.title(f'π⁰ Mass Distribution (n={len(signal_pi0_mass)})')
+    plt.title(rf'Mass Distribution of true $\pi^{0}$ (n={len(signal_pi0_mass)})')
+    # combine into one legend
+    #plt.legend(loc='best', fontsize=8, frameon=True, fancybox=True, shadow=True,
+    #           title=f'π⁰ Mass Distribution (n={len(signal_pi0_mass)})\nTrue π⁰ events'
+    #)
+    #plt.legend(loc='best', fontsize=8, title=f'π⁰ Mass Distribution (n={len(signal_pi0_mass)})') 
+    plt.legend(loc='best', fontsize=12, frameon=True, fancybox=True, shadow=True)
     plt.grid(True, alpha=0.3)
     plt.savefig('./plots/signal_pi0.png')
     plt.show(block=False)
@@ -93,7 +100,7 @@ if __name__ == "__main__":
 
     ## Inspect featrues
     print("\n1. Inspect features ...")
-    print(f"# columns ({len(pair_df.columns[:])}); Column name:    {pair_df.columns[:]}")
+    #print(f"# columns ({len(pair_df.columns[:])}); Column name:    {pair_df.columns[:]}")
     #print(pair_df.head(5))
     #print(f"Statistics:\n{pair_df.describe()}")
     #print(df.head(10))
@@ -105,7 +112,7 @@ if __name__ == "__main__":
     ## Pair plot (Scatter Matrix) correlations
     sample_size = min (1000, len(pair_df))
     sample_df = pair_df.sample(sample_size)
-    print(sample_df.head(5))
+    #print(sample_df.head(5))
 
     #('m_gg', 'opening_angle'),      # Should be correlated (higher mass = larger opening angle)
     #('m_gg', 'pt_asym'),             # Check if mass correlates with asymmetry
@@ -139,7 +146,7 @@ if __name__ == "__main__":
             if abs(corr) > 0.7:
                 high_corr.append((feature_columns[i], feature_columns[j], corr))
     
-    print(type(high_corr[0]), type(high_corr))
+    #print(type(high_corr[0]), type(high_corr))
 
     if high_corr:
         print("    Highly correlated pairs (>0.7):")
@@ -169,7 +176,7 @@ if __name__ == "__main__":
     # .drop(target): remove self-correlation
     # .sort_values(ascending=False): sort by strength; False: highest to lowest correlation
 
-    print(f"target_corr type: {type(target_corr), {target_corr.shape}}")
+    #print(f"target_corr type: {type(target_corr), {target_corr.shape}}")
     #print(target_corr)
 
    
@@ -204,8 +211,8 @@ if __name__ == "__main__":
 
     # Accuracy metrics
     print("\n3. Evaluating performance of events:")
-    result_events = df.sample(50) # test on a few events
-    #result_events = df
+    #result_events = df.sample(50) # test on a few events
+    result_events = df
 
     correct_predictions = 0
     total_signal_events = 0
@@ -234,11 +241,11 @@ if __name__ == "__main__":
             status = "BG"
 
         #truth = f"True pi0: {evt.true_pi0_pair}" if evt.is_signal else "Background event"
-        print(f"   Event {evt.event}: Best pair {best_pair}, score={score:.3f}, m={mass:.3f} | {status}")
+        #print(f"   Event {evt.event}: Best pair {best_pair}, score={score:.3f}, m={mass:.3f} | {status}")
 
         if total_signal_events > 0:
             accuracy = correct_predictions / total_signal_events * 100 
-            print(f"\nAccuracy on signal events: {accuracy:.1f}% ({correct_predictions}/{total_signal_events})")
+            #print(f"\nAccuracy on signal events: {accuracy:.1f}% ({correct_predictions}/{total_signal_events})")
 
         # collecting mass
         if evt.is_signal and best_pair == evt.true_pi0_pair:

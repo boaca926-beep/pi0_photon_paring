@@ -302,10 +302,15 @@ if __name__ == "__main__":
     print("\n✅ DONE! You're now using EXACT 4-vector kinematics.")
     print("\n📌 NEXT: Replace synthetic data with your real ntuple.")
     print("📌 Change column names in prepare_3photon_pairs() to match your branches.")
-    
+  
+
+# ============================================================================
+# CORRELATION SUMMARY
+# ============================================================================
+
     def print_correlation_summary(df, features, target='is_pi0'):
     """Print detailed correlation analysis"""
-    
+
     print("=" * 60)
     print("FEATURE CORRELATION ANALYSIS")
     print("=" * 60)
@@ -355,3 +360,64 @@ if __name__ == "__main__":
 
 # Use it
 print_correlation_summary(pair_df, feature_columns)
+
+
+# ============================================================================
+# MASS DISTRIBUTION
+# ============================================================================
+import matplotlib.pyplot as plt
+
+# Collect masses of identified pi0 candidates
+candidate_masses = []
+true_matches = []
+
+for _, evt in test_events.iterrows():
+    photons = [...]
+    best_pair, score, mass = find_best_pi0_candidate(photons, model)
+    
+    if evt.is_signal and best_pair == evt.true_pi0_pair:
+        candidate_masses.append(mass)
+        true_matches.append(1)
+    elif evt.is_signal:
+        candidate_masses.append(mass)
+        true_matches.append(0)
+
+plt.figure(figsize=(10,5))
+plt.hist([m for m, match in zip(candidate_masses, true_matches) if match], 
+         bins=30, alpha=0.5, label='Correctly identified', color='green')
+plt.hist([m for m, match in zip(candidate_masses, true_matches) if not match], 
+         bins=30, alpha=0.5, label='Wrong identification', color='red')
+plt.xlabel('Invariant Mass (GeV)')
+plt.ylabel('Count')
+plt.title('π0 Candidate Mass Distribution')
+plt.legend()
+plt.axvline(x=0.135, color='black', linestyle='--', label='True π0 mass')
+plt.show()
+
+# ============================================================================
+# SCORE DISTRIBUTION
+# ============================================================================
+# Check if score threshold could improve performance
+scores_signal = []
+scores_background = []
+
+for _, evt in test_events.iterrows():
+    photons = [...]
+    best_pair, score, mass = find_best_pi0_candidate(photons, model)
+    
+    if evt.is_signal:
+        if best_pair == evt.true_pi0_pair:
+            scores_signal.append(score)
+        else:
+            scores_background.append(score)
+    else:
+        scores_background.append(score)
+
+plt.figure(figsize=(10,5))
+plt.hist(scores_signal, bins=30, alpha=0.5, label='Correct signal', color='green')
+plt.hist(scores_background, bins=30, alpha=0.5, label='Background/mis-ID', color='red')
+plt.xlabel('Classifier Score')
+plt.ylabel('Count')
+plt.title('Score Distribution')
+plt.legend()
+plt.show()
