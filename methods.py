@@ -1,9 +1,78 @@
+import uproot
+import awkward as ak
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import xgboost as xgb
 from sklearn.metrics import roc_auc_score, roc_curve
 from sklearn.model_selection import train_test_split
+
+
+# =================================================================
+# KLOE data, root file, ntuples
+# =================================================================
+def kloe_sample():
+
+    """
+    Two KLOE MC samples are used for labeling three photon finat state
+    1. e+ e- -> phi -> eta gamma, eta -> pi+ pi- pi0 (2 gamma) + 1 gamma
+    2. e+ e- -> pi+ pi- pi0 (2 gamma) + gamma (isr photon) 
+    """
+    print("="*50)
+    print("Preparing KLOE data samples ...")
+    print("="*50)
+
+    input_str = ['signal', 'TISR3PI_SIG'] # Stored root file type [0], and branch name [1] 
+    signal_root_file = uproot.open(input_str[0] + "_sample.root") # Open signal root file
+    signal_br = input_str[1]
+    print(rf"Opening root file: {input_str[0]} ...")
+
+    # Inspect keys
+    for key, item in signal_root_file.items():
+        print(f"{key}: {type(item).__name__}")
+
+    signal_tree = signal_root_file[signal_br] # Access the signal tree
+    signal_df = signal_tree.arrays(library="pd") # Create data from the tree
+    
+    columns_signal_df = [col for col in signal_df.columns] # Original columns
+    #print(f"columns_signal_df   {len(columns_signal_df)}, {columns_signal_df}")
+    pho_nm_1 = ['Br_E1', 'Br_px1', 'Br_py1', 'Br_pz1']
+    pho_nm_2 = ['Br_E2', 'Br_px2', 'Br_py2', 'Br_pz2']
+    pho_nm_3 = ['Br_E3', 'Br_px3', 'Br_py3', 'Br_pz3']
+    pho_nm_sum = pho_nm_1 + pho_nm_2 + pho_nm_3
+    #print(var_nm)
+    photon_var = [col for col in signal_df.columns if col in pho_nm_sum]
+    #print(f"photon_var  {photon_var}")
+    #photon_signal_df = signal_tree.arrays(photon_var, library="pd") 
+    # Create (all, good, bad) signal data set with selected branches after the selection cuts: chi2 < 43
+    photon_all_signal_df = signal_df[signal_df['Br_lagvalue_min_7C'] < 43][pho_nm_sum]
+    photon_good_signal_df = signal_df[(signal_df['Br_lagvalue_min_7C'] < 43) & (signal_df['Br_recon_indx'] == 2) & (signal_df['Br_bkg_indx'])][pho_nm_sum]
+    photon_bad_signal_df = signal_df[(signal_df['Br_lagvalue_min_7C'] < 43) & ~((signal_df['Br_recon_indx'] == 2) & (signal_df['Br_bkg_indx']))][pho_nm_sum]
+
+    #print(photon_good_signal_df.head(5))
+
+    # New column vectors
+    pho_nm_1_new = ['E1', 'px1', 'py1', 'pz1']
+    pho_nm_2_new = ['E2', 'px2', 'py2', 'pz2']
+    pho_nm_3_new = ['E3', 'px3', 'py3', 'pz3']
+    pho_nm_sum_new = pho_nm_1_new + pho_nm_2_new + pho_nm_3_new
+    
+    # Change column names
+    if len(pho_nm_sum) == len(pho_nm_sum_new):
+        photon_all_signal_df.columns = pho_nm_sum_new
+        photon_good_signal_df.columns = pho_nm_sum_new
+        photon_bad_signal_df.columns = pho_nm_sum_new
+    else:
+        print(f"length mismatich!")
+    
+    #print(photon_good_signal_df.head(5))
+
+    # Add an additional column for the signal encode: 1
+
+    #print(signal_df.describe())
+    print(signal_df.head(6))
+
+    return photon_all_signal_df, photon_good_signal_df, photon_bad_signal_df
 
 # =================================================================
 # Testing data, simplified pi0 -> gamma gamma MC generator
@@ -12,6 +81,10 @@ def MC_generation():
     """
     Create synthetic data for testing
     """
+
+    print("="*50)
+    print("SIMPLE XGBOOST FOR 3-PHOTON pi0 RECONSTRUCTION")
+    print("="*50)
 
     np.random.seed(42)
     n_events = 1000
@@ -348,9 +421,9 @@ def plot_hist(df, columns_df, rows, bins, plot_nm):
     # Create 2x4 subplot grid
     plot_col = int(col_len / rows) # number of rows and columns to the plot
     fig, axes = plt.subplots(rows, plot_col, figsize=(16, 10)) # rows and columns to subplots
-    fig.suptitle(r'$\pi^{0}$ photon features', fontsize=16, y=1.02)
+    fig.suptitle(plot_nm, fontsize=16, y=1.02)
     colors = plt.cm.tab10(np.linspace(0, 1, col_len))  # Generate distinct colors
-     #color = ["blue", "black", "red", "yellow", "purple", "green", "orange", "brown", "gray", "cyan"]
+    #color = ["blue", "black", "red", "yellow", "purple", "green", "orange", "brown", "gray", "cyan"]
     #print(f"columns list ({col_len}); plot {rows}x{plot_col}")
 
     # Flatten axes array for easy iteration
@@ -360,15 +433,32 @@ def plot_hist(df, columns_df, rows, bins, plot_nm):
         #print(i, label)
         # desity=True normalized
         positive_data = df[df[label] > 0.2][label]
-        axes[i].hist(positive_data, color=colors[i], bins=bins, label=label, density=False, edgecolor='black', alpha=0.7)
+        axes[i].hist(positive_data, 
+                     color=colors[i], 
+                     bins=bins, 
+                     label=label, 
+                     density=False, 
+                     edgecolor=colors[i],
+                     linewidth=1, 
+                     alpha=0.7,
+                     histtype='stepfilled' # Filled histograms
+                     )
         #axes[i].hist(df[label], color=colors[i], bins=bins, label=label, density=False, edgecolor='black', alpha=0.7)
         #axes[i].set_title(label, fontsize=12)
-        axes[i].set_xlabel(label)
+        if label in ['E1', 'E2', 'E3']:
+            unit = fr'$\mathrm{{MeV}}/\mathrm{{c}}^{2}$'
+        elif label in ['px1', 'py1', 'pz1', 'px2', 'py2', 'pz2', 'px3', 'py3', 'pz3']:   
+            unit = fr'$\mathrm{{MeV}}/\mathrm{{c}}$'
+        else:
+            print("AU")
+ 
+        axes[i].set_xlabel(label + ' [' + unit + ']')
         axes[i].set_ylabel(None)
         axes[i].grid(True, alpha=0.3)
-        axes[i].legend(loc='best', fontsize=8) 
+        axes[i].legend(loc='best', fontsize=14) 
         #axes[i].set_yscale('log')  # <-- LOG SCALE ON Y-AXIS
         
+    plt.title(plot_nm)
     plt.tight_layout()
     plt.savefig('./plots/' + plot_nm + '.png', dpi=300, bbox_inches='tight')
     plt.show(block=False)
