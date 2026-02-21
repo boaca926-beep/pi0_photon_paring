@@ -5,7 +5,7 @@ import xgboost as xgb
 from sklearn.metrics import roc_auc_score
 import warnings
 from methods import prepare_3photon_paris, plot_hist, find_best_pi0_candidate, train_pi0_classifier_4vector, MC_generation
-from methods import kloe_sample
+from methods import kloe_sample, plot_compr_hist
 import seaborn as sns
 
 
@@ -53,23 +53,10 @@ print("pi0 photon selction, reduce combinatorial background.")
 
 if __name__ == "__main__":
 
-    all_signal, good_signal, bad_signal = kloe_sample()
-    #print(good_E1.head(5))
-    columns = [col for col in all_signal.columns]
-    plot_hist(all_signal, columns, 3, 100, "Photon 4-momentum (all signal)") # data, column list, number of rows to plot, number of bins
-    plot_hist(good_signal, columns, 3, 100, "Photon 4-momentum (good signal)") 
-    plot_hist(bad_signal, columns, 3, 100, "Photon 4-momentum (bad signal)") 
-
-    
-
-
-
-    
     synthetic_data = MC_generation()
     synthetic_df = pd.DataFrame(synthetic_data) 
     print(synthetic_df.head(5))
    
-    r'''
     df = pd.DataFrame(synthetic_data) # read data to DataFrame: 1. synthetic_data (testing data); 2. kloe_data (MC and data from the KLOE 3pi analysis)
     # columns list with labels only related to photon 4-momentum
     columns_df = [col for col in df.columns if col not in ['event', 'is_signal', 'true_pi0_pair']]
@@ -79,7 +66,7 @@ if __name__ == "__main__":
     #print(f"photon 4-mom (E, px, py, pz): ({df[]})")
 
     ## Plot 3 photon 4-momentum
-    plot_hist(df, columns_df, 3, 100, "Photon 4-momentum") # data, column list, number of rows to plot, number of bins
+    plot_hist(df, 3, 100, "Photon 4-momentum") # data, column list, number of rows to plot, number of bins
 
     ## Prepare pair dataset with EXACT 4-vector quantities
     print("\n0. Creating photon pairs with EXACT invariant masses ...")
@@ -166,7 +153,7 @@ if __name__ == "__main__":
     else:
         print("    No highly correlated feature pairs (>0.7)")
 
-    plot_hist(pair_df, columns_pair_df, 2, 100, "pi0_features") # plot pi0 photon features
+    plot_hist(pair_df, 2, 100, "pi0_features") # plot pi0 photon features
 
     ## Correlations with target
     target = 'is_pi0' # This is what we are trying to predict - whether a photon pair comes from a real pi0 decay or is ust random background
@@ -279,5 +266,6 @@ if __name__ == "__main__":
     plt.axvline(x=0.135, color='black', linestyle='--', label='True pi0 mass')
     plt.savefig('./plots/mass_distr_check.png')
     plt.show(block=False)
+    
     ## Score distribution analysis
-    '''
+    

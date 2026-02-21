@@ -59,20 +59,48 @@ def kloe_sample():
     
     # Change column names
     if len(pho_nm_sum) == len(pho_nm_sum_new):
-        photon_all_signal_df.columns = pho_nm_sum_new
-        photon_good_signal_df.columns = pho_nm_sum_new
+        # All signals
+        #photon_all_signal_df.columns = pho_nm_sum_new
+        #nb_all_signal = [i for i in range(len(photon_all_signal_df))] # Vector of number of all signal events
+        ##photon_all_signal_df['event'] = nb_all_signal 
+        #photon_all_signal_df.insert(0, 'event', nb_all_signal) # Add event column
+
+        # Good signals
+        photon_good_signal_df.columns = pho_nm_sum_new 
+        nb_good_signal = [i for i in range(len(photon_good_signal_df))]  
+        #photon_good_signal_df['event'] = nb_good_signal
+        photon_good_signal_df.insert(0, 'event', nb_good_signal) # Add event column 
+        #good_index = [(0, 1)] * len(nb_good_signal)
+        #photon_good_signal_df['true_pi0_pair'] = good_index # Add true_pi0_pair column
+        #print(label_good_signal)
+
+        # Bad signals
         photon_bad_signal_df.columns = pho_nm_sum_new
+        nb_bad_signal = [i for i in range(len(photon_bad_signal_df))]
+        #photon_bad_signal_df['event'] = nb_bad_signal
+        photon_bad_signal_df.insert(0, 'event', nb_bad_signal) # Add event column 
+        #bad_index = [(-1, -1)] * len(nb_bad_signal)
+        #photon_bad_signal_df['true_pi0_pair'] = bad_index # Add true_pi0_pair column
+
+        # Combine good and bad photons
+        photon_sum_signal_df = pd.concat([photon_good_signal_df, photon_bad_signal_df], ignore_index=True)
+        # Add a column to identify source
+        photon_sum_signal_df['true_pi0_pair'] = [(0, 1)] * len(nb_good_signal) + [(-1, -1)] * len(nb_bad_signal)
+
+        # Shuffle using numpy
+        photon_sum_signal_df = photon_sum_signal_df.sample(frac=1).reset_index(drop=True)
     else:
         print(f"length mismatich!")
     
     #print(photon_good_signal_df.head(5))
+    #print(f"Number of all signals = {len(photon_all_signal_df)}", nb_all_signal[:5])
 
     # Add an additional column for the signal encode: 1
 
     #print(signal_df.describe())
-    print(signal_df.head(6))
+    #print(signal_df.head(6))
 
-    return photon_all_signal_df, photon_good_signal_df, photon_bad_signal_df
+    return photon_sum_signal_df, photon_good_signal_df, photon_bad_signal_df
 
 # =================================================================
 # Testing data, simplified pi0 -> gamma gamma MC generator
@@ -397,9 +425,105 @@ def prepare_3photon_paris(df_events):
 # PLOT METHOD
 # =================================================================
 
-def plot_hist(df, columns_df, rows, bins, plot_nm):
+# Plot (all, good, bad) comparison
+def plot_compr_hist(df_set, rows, bins, plot_nm):
+
+    all_df = df_set[0]
+    good_df = df_set[1]
+    bad_df = df_set[2]
+
+    ##  S/B ratio
+    S = len(good_df)
+    B = len(bad_df)
+    S_purity = S / (S + B)
+    print(f"Total events: {len(all_df)}, good events: {len(good_df)}, bad events: {len(bad_df)}")
+    print(f"S/sqrt(S+B): {S / np.sqrt(S + B)}")
+    print(f"S_purity: {S_purity}")
+
+    ## Check col_len
+    col_len = len(all_df.columns) # length of columns of df
+
+    if (col_len < 0):
+        # negative
+        print(f"Negative col_len ({col_len})")
+        return
+    elif (col_len == 0):
+        # zero col_len
+        print(f"Zero col_len ({col_len})")
+    else:
+        # postive
+        if (col_len % 2 == 0):
+            # even case
+            print(f"good events col_len ({col_len})")
+        else:
+            # odd or not integer
+            print(f"Odd column length or none integer column length ({col_len}). Not plot is created!")
+            return
+
+    # Create subplot grid
+    plot_col = int(col_len / rows) # number of rows and columns to the plot
+    fig, axes = plt.subplots(rows, plot_col, figsize=(16, 10)) # rows and columns to subplots
+    fig.suptitle(plot_nm, fontsize=16, y=1.02)
+
+    # Flatten axes array for easy iteration
+    axes = axes.flatten()
+    columns = all_df.columns
     
-    col_len = len(columns_df) # length of columns of df
+    #for i, label in enumerate(columns_df[:col_len]):
+    for i, label in enumerate(columns):
+        #print(i, label)
+        # desity=True normalized
+        positive_good_df = good_df[good_df[label] > 0.2][label]
+        positive_bad_df = bad_df[bad_df[label] > 0.2][label]
+        positive_all_df = all_df[all_df[label] > 0.2][label]
+
+        n1, bin_edges1, patches1 = axes[i].hist([positive_good_df, positive_bad_df], 
+                     color=['green', 'blue'], 
+                     bins=bins, 
+                     label=[f'Good', f'Bad'], 
+                     density=False, 
+                     edgecolor=['green', 'blue'],
+                     linewidth=1, 
+                     alpha=0.5,
+                     histtype='stepfilled' # Filled histograms
+                     )
+
+        n2, bin_edges2, patches2 = axes[i].hist(positive_all_df, 
+                     color=['red'], 
+                     bins=bin_edges1, 
+                     label='All', 
+                     density=False, 
+                     edgecolor='red',
+                     linewidth=1, 
+                     alpha=0.5,
+                     histtype='step' # Filled histograms
+                     )
+        
+        if label in ['E1', 'E2', 'E3']:
+            unit = fr'$\mathrm{{MeV}}/\mathrm{{c}}^{2}$'
+        elif label in ['px1', 'py1', 'pz1', 'px2', 'py2', 'pz2', 'px3', 'py3', 'pz3']:   
+            unit = fr'$\mathrm{{MeV}}/\mathrm{{c}}$'
+        else:
+            print("AU")
+
+        bin_width = bin_edges2[1] - bin_edges2[0]
+        #print(f"bin_width: {bin_width:.2f}")
+ 
+        axes[i].set_xlabel(label + ' [' + unit + ']')
+        axes[i].set_ylabel(fr'Events / {bin_width:.1f} [{unit}]', fontsize=14)
+        axes[i].grid(True, alpha=0.3)
+        axes[i].legend(loc='best', fontsize=14) 
+    
+    plt.title(None)
+    plt.tight_layout()
+    plt.savefig('./plots/' + plot_nm + '_compr.png', dpi=300, bbox_inches='tight')
+    plt.show(block=False)
+    plt.close()
+
+# Plot individually
+def plot_hist(df, rows, bins, plot_nm):
+    
+    col_len = len(df.columns) # length of columns of df
 
     # check col_len
     if (col_len < 0):
@@ -413,12 +537,13 @@ def plot_hist(df, columns_df, rows, bins, plot_nm):
         # postive
         if (col_len % 2 == 0):
             # even case
-            print(f"good even col_len ({col_len})")
+            print(f"good events col_len ({col_len})")
         else:
             # odd or not integer
-            print(f"odd col_len or none integer col_len ({col_len})")
-        
-    # Create 2x4 subplot grid
+            print(f"Odd column length or none integer column length ({col_len}). Not plot is created!")
+            return
+
+    # Create subplot grid
     plot_col = int(col_len / rows) # number of rows and columns to the plot
     fig, axes = plt.subplots(rows, plot_col, figsize=(16, 10)) # rows and columns to subplots
     fig.suptitle(plot_nm, fontsize=16, y=1.02)
@@ -429,7 +554,8 @@ def plot_hist(df, columns_df, rows, bins, plot_nm):
     # Flatten axes array for easy iteration
     axes = axes.flatten()
 
-    for i, label in enumerate(columns_df[:col_len]):
+    #for i, label in enumerate(columns_df[:col_len]):
+    for i, label in enumerate(df.columns):
         #print(i, label)
         # desity=True normalized
         positive_data = df[df[label] > 0.2][label]
@@ -458,9 +584,13 @@ def plot_hist(df, columns_df, rows, bins, plot_nm):
         axes[i].legend(loc='best', fontsize=14) 
         #axes[i].set_yscale('log')  # <-- LOG SCALE ON Y-AXIS
         
+        #if (i == 0):
+        #    break
+        
     plt.title(plot_nm)
     plt.tight_layout()
     plt.savefig('./plots/' + plot_nm + '.png', dpi=300, bbox_inches='tight')
-    plt.show(block=False)
-    plt.close()
+    #plt.show(block=False)
+    plt.show()
+    #plt.close()
 
