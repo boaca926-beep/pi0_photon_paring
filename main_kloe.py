@@ -10,6 +10,8 @@ import seaborn as sns
 
 if __name__ == "__main__":
 
+    # Use KLOE dataset
+    
     all_signal, good_signal, bad_signal = kloe_sample()
     #print(good_E1.head(5))
     print(f'len bad     ', (all_signal['true_pi0_pair'] == (-1, -1)).sum())
